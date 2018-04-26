@@ -1,0 +1,8 @@
+usage: ./bench
+	-l <long>  busy us
+	-s <long>  idle us
+	-c <#>     CPU number
+	-n <int>   repeat cycles
+	-t <int>   total time
+	-v         verbose output on/off
+	-h         Print this help screen
