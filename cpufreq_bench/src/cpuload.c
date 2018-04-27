@@ -10,34 +10,28 @@
 #include<sched.h>  
 
 
-#define DEBUG
-#ifdef DEBUG
 #define dprintf printf
-#else
-#define dprintf(...) do { } while (0)
-#endif
 
 
 struct config
 {
-	unsigned long sleep;		/* sleep time in 	us */
+	unsigned long sleep;	/* sleep time in 	us */
 	unsigned long load;		/* load time in	us */
-	unsigned long cycles;		/* calculation cycles with the same sleep/load time */
-	unsigned long time;		/*  us */
-	unsigned int cpu;			/* cpu for which the affinity is set */
-	unsigned int verbose;		/* verbose output */
+	unsigned long cycles;	/* calculation cycles with the same sleep/load time */
+	unsigned long time;		/*  time in ms */
+	unsigned int cpu;		/*  affinity mask */
+	unsigned int verbose;	/* verbose output */
 };
 
 
 struct config *prepare_default_config()
 {
 	struct config *config = malloc(sizeof(struct config));
-	dprintf("loading defaults\n");
 	config->sleep = 5000;
 	config->load =5000;
 	config->cycles = 0;
 	config->time =  60 * 1000 * 1000;
-	config->cpu = 0;
+	config->cpu = 0xff;
 	config->verbose = 0;
 	return config;
 }
@@ -48,7 +42,7 @@ static struct option long_options[] = {
 	{"verbose",	0,	0,	'v'},
 	{"cpu",		1,	0,	'c'},
 	{"cycles",	1,	0,	'n'},
-	{"time",		1,	0,	't'},
+	{"time",	1,	0,	't'},
 	{"help",	0,	0,	'h'},
 	{0, 0, 0, 0}
 };
@@ -63,23 +57,27 @@ void usage()
 	printf("Options:\n");
 	printf(" -l <long>  busy us\n");
 	printf(" -s <long>  idle us\n");
-	printf(" -c <#>     CPU number\n");
+	printf(" -c <mask>  CPU mask\n");
 	printf(" -n <int>   repeat cycles\n");
-	printf(" -t <int>   total time\n");
+	printf(" -t <int>   total time in ms, 1: forever\n");
 	printf(" -v         verbose output on/off\n");
 	printf(" -h         Print this help screen\n");
 	exit(1);
 }
 
 
-int set_cpu_affinity(unsigned int cpu)
+int set_cpu_affinity(unsigned int cpumask)
 {
 	cpu_set_t cpuset;
+	int cpu = 0;
 
 	CPU_ZERO(&cpuset);
-	CPU_SET(cpu, &cpuset);
-
-	dprintf("set affinity to cpu #%u\n", cpu);
+	while(cpumask)
+	{
+		CPU_SET(cpu, &cpuset);
+		cpu ++;
+		cpumask = cpumask >> 1;
+	}
 
 	if (sched_setaffinity(getpid(), sizeof(cpu_set_t), &cpuset) < 0) {
 		perror("sched_setaffinity");
@@ -112,22 +110,20 @@ void udelay_x(long long dly)
 
 void start_test(struct config *config) 
 {
-	long long  t1, t2;
+	long long  t1;
 	unsigned long time = config->time;
 	if(!config->time)
 		time = (config->load +  config->sleep) * config->cycles;
 
 	
 	t1 = get_time();
-	
-	if (config->verbose) 
-		printf(" Starting test: %ld us,  %ld-%ld\n", time, config->sleep, config->load);
-	while( (get_time() - t1) < time)
+	while( (get_time() - t1) < time || time ==1000)
 	{
 		usleep(config->sleep);
 		udelay_x(config->load);
 	}
-	printf(" End test.\n");
+	if (config->verbose) 
+		printf("End cpufreqbench.\n");
 	
 }
 
@@ -155,27 +151,23 @@ int main(int argc, char **argv)
 		switch (c) {
 		case 's':
 			sscanf(optarg, "%li", &config->sleep);
-			dprintf("idle time -> %s\n", optarg);
 			break;
 		case 'l':
 			sscanf(optarg, "%li", &config->load);
-			dprintf("busy time -> %s\n", optarg);
 			break;
 		case 'c':
-			sscanf(optarg, "%u", &config->cpu);
-			dprintf("cpu -> %s\n", optarg);
+			sscanf(optarg, "%x", &config->cpu);
+			config->cpu &= 0xff;
 			break;
 		case 'n':
 			sscanf(optarg, "%ld", &config->cycles);
-			dprintf("repeat cycles -> %s\n", optarg);
 			break;
 		case 't':
 			sscanf(optarg, "%ld", &config->time);
-			dprintf("total times -> %s\n", optarg);
+			config->time *=1000;
 			break;
 		case 'v':
 			config->verbose = 1;
-			dprintf("verbose output enabled\n");
 			break;
 		case 'h':
 		case '?':
@@ -188,17 +180,13 @@ int main(int argc, char **argv)
 	}
 
 	if (config->verbose) 
-		printf("Starting cpufreq benchmark with :\n idle=%li\n busy=%li\n cpu=%u\n time=%ld\n\t cycles=%ld\n",
-		       config->sleep, config->load, config->cpu, config->time, config->cycles);
-
-	if (config->verbose)
-		printf("set cpu affinity to cpu #%u\n", config->cpu);
-
+		printf("\n\nStarting loadbench:\n idle=%li, busy=%li ms>\n cpumask=0x%x\n time=%ld ms, cycles=%ld\n",
+		       config->sleep, config->load, config->cpu, config->time/1000, config->cycles);
 	set_cpu_affinity(config->cpu);
 
 	start_test(config);
 	free(config);
-
+	
 	return EXIT_SUCCESS;
 }
 
